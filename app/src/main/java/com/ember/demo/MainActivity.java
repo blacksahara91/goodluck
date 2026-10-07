@@ -1,218 +1,486 @@
 package com.ember.demo;
 
 import android.app.Activity;
+import android.app.AlertDialog;
+import android.content.Context;
 import android.content.Intent;
-import android.net.Uri;
+import android.content.SharedPreferences;
+import android.graphics.Color;
+import android.graphics.Typeface;
 import android.os.Bundle;
-import android.text.Editable;
-import android.text.TextWatcher;
+import android.text.TextUtils;
+import android.util.TypedValue;
+import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.AdapterView;
-import android.widget.ArrayAdapter;
 import android.widget.BaseAdapter;
+import android.widget.Button;
 import android.widget.EditText;
+import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
 import android.widget.ListView;
-import android.widget.Spinner;
+import android.widget.ProgressBar;
+import android.widget.ScrollView;
 import android.widget.TextView;
+import android.widget.Toast;
 
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
+import java.util.Locale;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
+/**
+ * AI App Maker - simplified one-click AI app builder.
+ * Type what you want in Burmese, tap once, free AI builds a
+ * single-file HTML app, it is saved locally and opened instantly.
+ */
 public class MainActivity extends Activity {
 
-    static final String CAT_ALL = "အားလုံး";
-    static final String CAT_VIDEO = "ဗီဒီယို";
-    static final String CAT_AUDIO = "အသံ";
-    static final String CAT_IMAGE = "ပုံ";
-    static final String CAT_TEXT = "စာသား";
-    static final String CAT_CODE = "ကုဒ်";
-    static final String CAT_SEARCH = "ရှာဖွေရေး";
-    static final String CAT_MEETING = "အစည်းအဝေး";
-    static final String CAT_BIZ = "လုပ်ငန်း";
+    static final int BG = 0xFF121212;
+    static final int CARD = 0xFF1E1E1E;
+    static final int ACCENT = 0xFFFF8C1A;
+    static final int GREEN = 0xFF2ECC71;
+    static final int TEXT = 0xFFFFFFFF;
+    static final int SUB = 0xFFAAAAAA;
+    static final int DANGER = 0xFFE74C3C;
 
-    static class Tool {
-        final String name;
-        final String desc;
-        final String url;
-        final String cat;
-        Tool(String name, String desc, String url, String cat) {
-            this.name = name;
-            this.desc = desc;
-            this.url = url;
-            this.cat = cat;
-        }
-    }
+    static final String API_URL = "https://text.pollinations.ai/openai";
+    static final String PREFS = "ai_app_maker";
+    static final String KEY_INDEX = "apps_index";
 
-    static final Tool[] TOOLS = new Tool[] {
-        new Tool("Explee", "B2B Lead တွေကို ရှာဖွေပေးပြီး Cold Email တွေကို အလိုအလျောက် ပို့ပေးတဲ့ Tool။", "https://explee.com", CAT_BIZ),
-        new Tool("NoteGPT", "စာရွက်စာတမ်းရှည်တွေကို အနှစ်ချုပ်ပေးပြီး Podcast အသံဖိုင်အဖြစ် ပြောင်းလဲပေးနိုင်တဲ့ ဝဘ်ဆိုက်။", "https://notegpt.io", CAT_TEXT),
-        new Tool("Napkin AI", "သာမန်စာသားတွေကို စနစ်ကျပြီး ကြည့်ကောင်းတဲ့ Business Diagram တွေအဖြစ် ချက်ချင်း ပြောင်းပေးတယ်။", "https://napkin.ai", CAT_BIZ),
-        new Tool("Ideogram", "ပုံတွေထဲမှာ စာလုံးဒီဇိုင်းနဲ့ Typography တွေကို အမှားအယွင်းမရှိ တိကျသပ်ရပ်စွာ ထည့်သွင်းဖန်တီးပေးနိုင်တဲ့ Tool။", "https://ideogram.ai", CAT_IMAGE),
-        new Tool("Suno", "စာသား Prompt လေးတစ်ခု ပေးရုံနဲ့ ကိုယ်လိုချင်တဲ့ ဂီတအမျိုးအစားအလိုက် သီချင်းတစ်ပုဒ်လုံးကို အသံသွင်းပြီးသားအထိ ထုတ်ပေးတယ်။", "https://suno.com", CAT_AUDIO),
-        new Tool("HeyGen", "ကိုယ့်ရဲ့ မျက်နှာနဲ့ အသံကို Clone လုပ်ပြီး ဘာသာစကားမျိုးစုံနဲ့ နှုတ်ခမ်းလှုပ်ရှားမှု သဘာဝကျတဲ့ AI Video တွေ ပြုလုပ်ပေးနိုင်တယ်။", "https://heygen.com", CAT_VIDEO),
-        new Tool("Kling AI", "ရုပ်ရှင်အဆင့် ရုပ်ထွက်နဲ့ လှုပ်ရှားမှု သဘာဝကျကျ ထွက်ပေါ်စေတဲ့ ထိပ်တန်း AI Video Generator။", "https://klingai.com", CAT_VIDEO),
-        new Tool("ElevenLabs", "ဘယ်သူ့အသံကိုမဆို စိတ်ခံစားမှု၊ အတက်အကျ သဘာဝအတိုင်း Clone လုပ်ပေးနိုင်တဲ့ ထိပ်တန်း အသံဖန်တီးရေး Tool။", "https://elevenlabs.io", CAT_AUDIO),
-        new Tool("Gamma", "Prompt ရိုက်ထည့်လိုက်ရုံနဲ့ Professional Presentation Slide တွေ၊ Doc တွေနဲ့ Web Page တွေကို စက္ကန့်ပိုင်းအတွင်း ဖန်တီးပေးတယ်။", "https://gamma.app", CAT_BIZ),
-        new Tool("Perplexity", "တကယ့် ခိုင်လုံတဲ့ အရင်းအမြစ် Source တွေနဲ့ Reference တွေကို တွဲဖက်ဖော်ပြပေးတဲ့ AI Search Engine။", "https://perplexity.ai", CAT_SEARCH),
-        new Tool("Pika", "သာမန်ဓာတ်ပုံ ငြိမ်ငြိမ်လေးတွေကို လှုပ်ရှားမှုအပြည့်နဲ့ ဗီဒီယိုအဖြစ် အသက်သွင်းပေးတဲ့ Tool။", "https://pika.art", CAT_VIDEO),
-        new Tool("Runway", "Filmmaker တွေနဲ့ ဗီဒီယိုဖန်တီးသူတွေအတွက် Cinematic အဆင့် AI Video တွေ ထုတ်လုပ်ပေးတဲ့ စနစ်။", "https://runwayml.com", CAT_VIDEO),
-        new Tool("Cursor", "Code ရေးတာ၊ ပြင်ဆင်တာနဲ့ Debug လုပ်တာတွေကို ကိုယ်နဲ့အတူ တွဲလုပ်ပေးတဲ့ AI Code Editor။", "https://cursor.com", CAT_CODE),
-        new Tool("v0", "သာမန် စကားပြော Prompt လေးတွေနဲ့တင် Frontend UI Component တွေနဲ့ Web Page တွေကို အလွယ်တကူ တည်ဆောက်ပေးတယ်။", "https://v0.dev", CAT_CODE),
-        new Tool("Lovable", "စိတ်ကူး စိတ်သန်းနဲ့ ဒီဇိုင်းတွေကို အမှန်တကယ် အသုံးပြုလို့ရတဲ့ Full-stack Web App အဖြစ် ပြောင်းလဲပေးနိုင်တဲ့ Tool။", "https://lovable.dev", CAT_CODE),
-        new Tool("Descript", "ထွက်လာတဲ့ စာသား Transcript ကို စာရိုက်ပြင်သလို ဖြတ်ထုတ်ရုံနဲ့ ဗီဒီယိုနဲ့ အသံဖိုင်ကို တည်းဖြတ်ပေးနိုင်တဲ့ Tool။", "https://descript.com", CAT_VIDEO),
-        new Tool("Opus Clip", "ဗီဒီယို အရှည်ကြီးတွေကို Caption စာတန်းထိုးပါတဲ့ Short-form ဗီဒီယို တိုတိုလေးတွေအဖြစ် အလိုအလျောက် ဖြတ်ထုတ်ပေးတယ်။", "https://opus.pro", CAT_VIDEO),
-        new Tool("Krea AI", "ကင်းဗတ်စ်ပေါ်မှာ ဆွဲရင်း ချက်ချင်း ပုံထွက်လာစေတဲ့ Real-time AI Image Generator။", "https://krea.ai", CAT_IMAGE),
-        new Tool("Magnific", "ပုံဝါးတာတွေ၊ Resolution နိမ့်တာတွေကို အသေးစိတ် Texture ပေါင်းထည့်ပြီး အရည်အသွေး အဆမတန် မြှင့်တင်ပေးတဲ့ Tool။", "https://magnific.ai", CAT_IMAGE),
-        new Tool("Viggle", "ကိုယ်ဖန်တီးထားတဲ့ Character ကို ဘယ်ဗီဒီယိုထဲက လှုပ်ရှားမှုနဲ့မဆို သဘာဝကျကျ အစားထိုး ကပြလှုပ်ရှားစေနိုင်တယ်။", "https://viggle.ai", CAT_VIDEO),
-        new Tool("tl;dv", "Zoom, Teams နဲ့ Google Meet အစည်းအဝေးတွေကို မှတ်တမ်းတင်ပေးပြီး အရေးကြီးတဲ့ အချက်တွေကို အနှစ်ချုပ်ပေးတယ်။", "https://tldv.io", CAT_MEETING),
-        new Tool("Fireflies", "Meeting တွေထဲ ဝင်ရောက်ပြီး ဆွေးနွေးချက် မှတ်စုတွေ၊ Action Item တွေကို အလိုအလျောက် ရေးမှတ်ပေးတဲ့ AI Assistant။", "https://fireflies.ai", CAT_MEETING),
-        new Tool("Castmagic", "အသံဖိုင်တွေကို Newsletter၊ Blog Post နဲ့ Social Media Content တွေအဖြစ် ချက်ချင်း ပြောင်းလဲပေးတဲ့ Tool။", "https://castmagic.io", CAT_AUDIO),
-        new Tool("Replit", "Browser ပေါ်ကနေတင် Code ရေး၊ စမ်းသပ်ပြီး တိုက်ရိုက် Deploy လုပ်နိုင်တဲ့ Cloud Platform။", "https://replit.com", CAT_CODE),
-        new Tool("Leonardo AI", "Creator တွေအတွက် ပုံစံမျိုးစုံနဲ့ အရည်အသွေးမြင့် ပုံတွေကို လျင်မြန်စွာ ဖန်တီးပေးနိုင်တဲ့ Tool။", "https://leonardo.ai", CAT_IMAGE),
-        new Tool("Synthesia", "ကင်မရာ၊ မိုက်ခရိုဖုန်း မလိုဘဲ AI Avatar တွေနဲ့ လုပ်ငန်းသုံး ဗီဒီယို Presentation တွေကို အလွယ်တကူ ဖန်တီးနိုင်တယ်။", "https://synthesia.io", CAT_VIDEO),
-        new Tool("Fliki", "စာသားတွေနဲ့ ဆောင်းပါးတွေကို သဘာဝကျတဲ့ အသံနောက်ခံပါတဲ့ ဗီဒီယိုတွေအဖြစ် ပြောင်းလဲပေးတဲ့ Tool။", "https://fliki.ai", CAT_VIDEO),
-        new Tool("Photoroom", "ကုန်ပစ္စည်း ဓာတ်ပုံတွေရဲ့ နောက်ခံကို ဖျက်ပေးပြီး Studio အဆင့် အလင်းအမှောင်တွေ အလိုအလျောက် ထည့်သွင်းပေးတယ်။", "https://photoroom.com", CAT_IMAGE),
-        new Tool("Invideo AI", "စာသား Prompt လေး ပေးလိုက်ရုံနဲ့ Script၊ အသံနဲ့ တည်းဖြတ်မှု အပြည့်အစုံပါတဲ့ ဗီဒီယို အချောထည် ထုတ်ပေးတယ်။", "https://invideo.io", CAT_VIDEO),
-        new Tool("Consensus", "သိပ္ပံနည်းကျ သုတေသန စာတမ်းတွေက ဘာပြောထားသလဲဆိုတာကို တိကျစွာ ရှာဖွေပေးတဲ့ AI Search Tool။", "https://consensus.app", CAT_SEARCH),
-        new Tool("SciSpace", "ရှုပ်ထွေးတဲ့ Research Paper တွေ၊ သုတေသနဇယားတွေနဲ့ တွက်ချက်မှုတွေကို နားလည်လွယ်အောင် ရှင်းပြပေးတယ်။", "https://scispace.com", CAT_SEARCH),
-        new Tool("Tome", "စီးပွားရေး Pitch Deck တွေနဲ့ Storytelling Presentation တွေကို ပုံနဲ့တကွ စနစ်တကျ ရေးဖွဲ့တည်ဆောက်ပေးတယ်။", "https://tome.app", CAT_BIZ),
-        new Tool("Beautiful AI", "Slide ဒီဇိုင်းနဲ့ Layout တွေကို အချိုးအစား ညီညွတ်အောင် အလိုအလျောက် ချိန်ညှိပေးတဲ့ Smart Presentation Tool။", "https://beautiful.ai", CAT_BIZ),
-        new Tool("Meshy", "စာသား ဒါမှမဟုတ် ဓာတ်ပုံကနေ 3D Model နဲ့ Texture တွေကို ချက်ချင်း ဖန်တီးပေးနိုင်တဲ့ Tool။", "https://meshy.ai", CAT_IMAGE),
-        new Tool("Vizcom", "လက်နဲ့ ရေးဆွဲထားတဲ့ ပုံကြမ်း (Sketch) တွေကို လက်တွေ့ကျတဲ့ 3D Render ရုပ်ထွက်အဖြစ် Real-time ပြောင်းပေးတယ်။", "https://vizcom.ai", CAT_IMAGE),
+    static final String SYSTEM_PROMPT =
+            "You are a mobile web app builder. The user describes an app (in Burmese or English). "
+            + "Respond with ONLY one complete self-contained HTML file: inline <style> and <script>, "
+            + "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">, mobile-friendly layout, "
+            + "big touch buttons, clean modern design. ALL visible UI text must be in Burmese (Myanmar language). "
+            + "Output raw HTML only, starting with <!DOCTYPE html>. No explanations, no markdown fences.";
+
+    static final String[] EXAMPLES = {
+            "\uD83D\uDCDD \u1019\u103E\u1010\u103A\u1005\u102F\u101E\u102D\u1019\u103A\u1038\u1010\u1032\u1037 app",
+            "\uD83E\uDDEE \u101B\u102D\u102F\u1038\u101B\u103E\u1004\u103A\u1038\u1010\u1032\u1037 \u1010\u103D\u1000\u103A\u1005\u1000\u103A app",
+            "\uD83D\uDCB0 \u1004\u103D\u1031\u1005\u102C\u101B\u1004\u103A\u1038 \u1019\u103E\u1010\u103A\u1010\u1019\u103A\u1038 app",
+            "\uD83D\uDED2 \u1005\u103B\u1031\u1038\u101D\u101A\u103A\u1005\u102C\u101B\u1004\u103A\u1038 checklist app"
     };
 
-    private final List<Tool> filtered = new ArrayList<Tool>();
-    private ToolAdapter adapter;
-    private String query = "";
-    private String cat = CAT_ALL;
+    EditText promptInput;
+    Button buildBtn;
+    ProgressBar progress;
+    TextView statusText;
+    ListView appsList;
+    TextView emptyText;
+    AppsAdapter adapter;
+    List<AppEntry> apps = new ArrayList<>();
+
+    static class AppEntry {
+        String file, title;
+        long ts;
+        AppEntry(String file, String title, long ts) {
+            this.file = file; this.title = title; this.ts = ts;
+        }
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        buildUi();
+        loadIndex();
+        refreshList();
+    }
 
+    @Override
+    protected void onResume() {
+        super.onResume();
+        loadIndex();
+        refreshList();
+    }
+
+    // ---------- UI ----------
+
+    void buildUi() {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        int pad = dp(12);
-        root.setPadding(pad, pad, pad, pad);
+        root.setBackgroundColor(BG);
 
-        TextView header = new TextView(this);
-        header.setText("AI Tools Hub — ၃၅ ခု");
-        header.setTextSize(22);
-        int hpad = dp(4);
-        header.setPadding(hpad, hpad, hpad, dp(8));
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        LinearLayout col = new LinearLayout(this);
+        col.setOrientation(LinearLayout.VERTICAL);
+        int p = dp(18);
+        col.setPadding(p, p, p, p);
 
-        final EditText searchBox = new EditText(this);
-        searchBox.setHint("ရှာရန်…");
-        searchBox.setSingleLine(true);
+        TextView title = tv("\uD83E\uDD16 AI App Maker", 24, true, TEXT);
+        col.addView(title);
+        TextView sub = tv("\u1018\u102C\u1006\u1031\u102C\u1000\u103A\u1001\u103B\u1004\u103A\u101C\u1032 \u101B\u1031\u1038\u1015\u102B \u2014 \u1010\u1005\u103A\u1001\u103B\u1000\u103A\u1014\u103E\u102D\u1015\u103A\u101B\u102F\u1036\u1014\u1032\u1037 AI \u1000 \u1021\u1001\u1019\u1032\u1037 \u1006\u1031\u102C\u1000\u103A\u1015\u1031\u1038\u1019\u101A\u103A", 14, false, SUB);
+        col.addView(sub);
+        col.addView(space(14));
 
-        final Spinner catSpinner = new Spinner(this);
-        final String[] cats = new String[] {
-            CAT_ALL, CAT_VIDEO, CAT_AUDIO, CAT_IMAGE, CAT_TEXT,
-            CAT_CODE, CAT_SEARCH, CAT_MEETING, CAT_BIZ
-        };
-        ArrayAdapter<String> catAdapter = new ArrayAdapter<String>(
-                this, android.R.layout.simple_spinner_item, cats);
-        catAdapter.setDropDownViewResource(
-                android.R.layout.simple_spinner_dropdown_item);
-        catSpinner.setAdapter(catAdapter);
+        promptInput = new EditText(this);
+        promptInput.setHint("\u1025\u1015\u1019\u102B \u2014 \u1014\u1031\u1037\u1005\u1009\u103A\u1004\u103D\u1031\u1005\u102C\u101B\u1004\u103A\u1038 \u1019\u103E\u1010\u103A\u1010\u1036\u1037\u1037 app\u2026");
+        promptInput.setHintTextColor(0xFF777777);
+        promptInput.setTextColor(TEXT);
+        promptInput.setBackgroundColor(CARD);
+        promptInput.setMinLines(3);
+        promptInput.setGravity(Gravity.TOP);
+        promptInput.setPadding(dp(14), dp(14), dp(14), dp(14));
+        promptInput.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+        col.addView(promptInput);
+        col.addView(space(10));
 
-        final ListView listView = new ListView(this);
-        adapter = new ToolAdapter();
-        listView.setAdapter(adapter);
+        // example chips
+        HorizontalScrollView hsv = new HorizontalScrollView(this);
+        hsv.setHorizontalScrollBarEnabled(false);
+        LinearLayout chips = new LinearLayout(this);
+        chips.setOrientation(LinearLayout.HORIZONTAL);
+        for (String ex : EXAMPLES) {
+            Button chip = new Button(this);
+            // strip emoji prefix for the prompt value
+            final String val = ex.replaceAll("^[\\uD83C-\\uDBFF\\uDC00-\\uDFFF\\s]+", "");
+            chip.setText(ex);
+            chip.setTextColor(TEXT);
+            chip.setBackgroundColor(0xFF2A2A2A);
+            chip.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            lp.setMargins(0, 0, dp(8), 0);
+            chip.setLayoutParams(lp);
+            chip.setOnClickListener(v -> promptInput.setText(val));
+            chips.addView(chip);
+        }
+        hsv.addView(chips);
+        col.addView(hsv);
+        col.addView(space(12));
 
-        searchBox.addTextChangedListener(new TextWatcher() {
-            public void beforeTextChanged(CharSequence s, int start, int count, int after) { }
-            public void onTextChanged(CharSequence s, int start, int before, int count) { }
-            public void afterTextChanged(Editable s) {
-                query = s.toString().trim().toLowerCase();
-                applyFilter();
-            }
-        });
+        buildBtn = new Button(this);
+        buildBtn.setText("\uD83D\uDE80 \u1010\u1005\u103A\u1001\u103B\u1000\u103A\u1014\u103E\u102D\u1015\u103A\u1015\u102E\u1038 \u1006\u1031\u102C\u1000\u103A");
+        buildBtn.setTextColor(Color.WHITE);
+        buildBtn.setBackgroundColor(ACCENT);
+        buildBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
+        buildBtn.setTypeface(null, Typeface.BOLD);
+        buildBtn.setPadding(dp(16), dp(16), dp(16), dp(16));
+        buildBtn.setOnClickListener(v -> onBuild());
+        col.addView(buildBtn);
+        col.addView(space(8));
 
-        catSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
-            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
-                cat = cats[position];
-                applyFilter();
-            }
-            public void onNothingSelected(AdapterView<?> parent) { }
-        });
+        progress = new ProgressBar(this);
+        progress.setVisibility(View.GONE);
+        LinearLayout.LayoutParams plp = new LinearLayout.LayoutParams(dp(48), dp(48));
+        plp.gravity = Gravity.CENTER_HORIZONTAL;
+        progress.setLayoutParams(plp);
+        col.addView(progress);
 
-        listView.setOnItemClickListener(new AdapterView.OnItemClickListener() {
-            public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
-                Tool t = filtered.get(position);
-                Intent i = new Intent(Intent.ACTION_VIEW, Uri.parse(t.url));
-                startActivity(i);
-            }
-        });
+        statusText = tv("", 14, false, SUB);
+        statusText.setGravity(Gravity.CENTER_HORIZONTAL);
+        statusText.setVisibility(View.GONE);
+        col.addView(statusText);
+        col.addView(space(16));
 
-        root.addView(header, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT));
-        root.addView(searchBox, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT));
-        root.addView(catSpinner, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT));
-        root.addView(listView, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
+        TextView myApps = tv("\uD83D\uDCF1 \u1000\u103B\u103D\u1014\u103A\u1010\u1031\u102C\u1037 app \u1019\u103B\u102C\u1038", 18, true, TEXT);
+        col.addView(myApps);
+        col.addView(space(8));
 
-        applyFilter();
+        emptyText = tv("\u1001\u102F\u1011\u102D app \u1019\u1006\u1031\u102C\u1000\u103A\u101B\u1006\u1031\u1038\u1018\u1030\u1038\n\u1021\u1015\u1031\u102B\u1033\u1019\u103E\u102C \u101B\u1031\u1038\u1015\u102E\u1038 \u1005\u1019\u103A\u1038\u1000\u103C\u100A\u1037\u104B", 14, false, SUB);
+        emptyText.setGravity(Gravity.CENTER_HORIZONTAL);
+        col.addView(emptyText);
+
+        appsList = new ListView(this);
+        adapter = new AppsAdapter();
+        appsList.setAdapter(adapter);
+        // fixed height list inside scrollview: compute in refresh
+        col.addView(appsList);
+        col.addView(space(8));
+
+        TextView foot = tv("\u1021\u1001\u1019\u1032\u1037 AI \u1018\u1031\u103A \u2014 key \u101C\u102D\u102F\u1036\u1019\u101C\u102D\u102F", 12, false, 0xFF777777);
+        foot.setGravity(Gravity.CENTER_HORIZONTAL);
+        col.addView(foot);
+
+        scroll.addView(col);
+        root.addView(scroll);
         setContentView(root);
     }
 
-    private int dp(int v) {
-        float d = getResources().getDisplayMetrics().density;
-        return Math.round(v * d);
+    TextView tv(String s, int sp, boolean bold, int color) {
+        TextView t = new TextView(this);
+        t.setText(s);
+        t.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp);
+        t.setTextColor(color);
+        if (bold) t.setTypeface(null, Typeface.BOLD);
+        return t;
     }
 
-    private void applyFilter() {
-        filtered.clear();
-        for (int i = 0; i < TOOLS.length; i++) {
-            Tool t = TOOLS[i];
-            boolean okCat = cat.equals(CAT_ALL) || t.cat.equals(cat);
-            boolean okQuery = query.length() == 0
-                    || t.name.toLowerCase().contains(query)
-                    || t.desc.toLowerCase().contains(query);
-            if (okCat && okQuery) {
-                filtered.add(t);
+    View space(int dpv) {
+        View v = new View(this);
+        v.setLayoutParams(new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(dpv)));
+        return v;
+    }
+
+    int dp(int v) {
+        return (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v,
+                getResources().getDisplayMetrics());
+    }
+
+    // ---------- build flow ----------
+
+    void onBuild() {
+        final String prompt = promptInput.getText().toString().trim();
+        if (TextUtils.isEmpty(prompt)) {
+            Toast.makeText(this, "\u1018\u102C\u1006\u1031\u102C\u1000\u103A\u1001\u103B\u1004\u103A\u101C\u1032 \u1021\u101B\u1004\u103A\u101B\u1031\u1038\u1015\u102B \u2710\uFE0F", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        buildBtn.setEnabled(false);
+        progress.setVisibility(View.VISIBLE);
+        statusText.setVisibility(View.VISIBLE);
+        statusText.setText("\u23F3 AI \u1000 \u1006\u1031\u102C\u1000\u103A\u1014\u1031\u1015\u102B\u1010\u101A\u103A\u2026\n\u0031-\u0032 \u1019\u102D\u1014\u1005\u103A \u1000\u103C\u102C\u1014\u102D\u102F\u1004\u103A\u1015\u102B\u1010\u101A\u103A");
+
+        new Thread(() -> {
+            try {
+                String html = callAi(prompt);
+                String title = extractTitle(html, prompt);
+                String fname = saveApp(html, title);
+                runOnUiThread(() -> {
+                    resetBuildUi();
+                    Toast.makeText(this, "\u2705 \u1006\u1031\u102C\u1000\u103A\u1015\u102E\u1038\u1015\u102B\u1010\u101A\u103A!", Toast.LENGTH_SHORT).show();
+                    loadIndex();
+                    refreshList();
+                    openApp(fname);
+                });
+            } catch (Exception e) {
+                final String msg = e.getMessage() != null && e.getMessage().contains("UnknownHost")
+                        ? "\u274C \u1021\u1004\u103A\u1010\u102C\u1014\u1000\u103A \u1019\u101B\u1018\u1030\u1038 \u2014 \u1016\u103D\u1004\u103A\u1015\u102E\u1038 \u1015\u103C\u1014\u103A\u1000\u103C\u102D\u102F\u1038\u1005\u102C\u1038\u1015\u102B"
+                        : "\u274C AI \u1000 \u1015\u103C\u1014\u103A\u1019\u1006\u103E\u1039\u1018\u1030\u1038 \u2014 \u1001\u100F\u1014\u1031\u1015\u103C\u1014\u103A\u1000\u103C\u102D\u102F\u1038\u1005\u102C\u1038\u1015\u102B";
+                runOnUiThread(() -> {
+                    resetBuildUi();
+                    statusText.setVisibility(View.VISIBLE);
+                    statusText.setText(msg);
+                });
             }
+        }).start();
+    }
+
+    void resetBuildUi() {
+        buildBtn.setEnabled(true);
+        progress.setVisibility(View.GONE);
+        statusText.setVisibility(View.GONE);
+    }
+
+    String callAi(String prompt) throws Exception {
+        JSONObject body = new JSONObject();
+        body.put("model", "openai");
+        JSONArray msgs = new JSONArray();
+        msgs.put(new JSONObject().put("role", "system").put("content", SYSTEM_PROMPT));
+        msgs.put(new JSONObject().put("role", "user")
+                .put("content", prompt + "\n\nOutput ONLY the raw HTML."));
+        body.put("messages", msgs);
+
+        byte[] payload = body.toString().getBytes(StandardCharsets.UTF_8);
+        HttpURLConnection c = (HttpURLConnection) new URL(API_URL).openConnection();
+        c.setRequestMethod("POST");
+        c.setDoOutput(true);
+        c.setConnectTimeout(30000);
+        c.setReadTimeout(180000);
+        c.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+        c.setRequestProperty("Accept", "application/json");
+        OutputStream os = c.getOutputStream();
+        os.write(payload);
+        os.flush();
+        os.close();
+
+        int code = c.getResponseCode();
+        InputStream in = code >= 200 && code < 300 ? c.getInputStream() : c.getErrorStream();
+        BufferedReader br = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8));
+        StringBuilder sb = new StringBuilder();
+        String line;
+        while ((line = br.readLine()) != null) sb.append(line).append('\n');
+        br.close();
+        if (code < 200 || code >= 300) throw new Exception("HTTP " + code);
+
+        String content = new JSONObject(sb.toString())
+                .getJSONArray("choices").getJSONObject(0)
+                .getJSONObject("message").getString("content");
+        String html = extractHtml(content);
+        if (!html.toLowerCase(Locale.US).contains("<html")) throw new Exception("bad html");
+        return html;
+    }
+
+    static String extractHtml(String s) {
+        int a = s.indexOf("```html");
+        if (a >= 0) {
+            int b = s.indexOf("```", a + 7);
+            if (b > a) return s.substring(a + 7, b).trim();
         }
-        if (adapter != null) {
-            adapter.notifyDataSetChanged();
+        int h = s.indexOf("<!DOCTYPE");
+        if (h < 0) h = s.toLowerCase(Locale.US).indexOf("<html");
+        int e = s.toLowerCase(Locale.US).lastIndexOf("</html>");
+        if (h >= 0 && e > h) return s.substring(h, e + 7).trim();
+        return s.trim();
+    }
+
+    static String extractTitle(String html, String fallback) {
+        Matcher m = Pattern.compile("<title[^>]*>(.*?)</title>",
+                Pattern.CASE_INSENSITIVE | Pattern.DOTALL).matcher(html);
+        if (m.find()) {
+            String t = m.group(1).trim().replaceAll("\\s+", " ");
+            if (!t.isEmpty()) return t;
+        }
+        return fallback.length() > 30 ? fallback.substring(0, 30) + "\u2026" : fallback;
+    }
+
+    String saveApp(String html, String title) throws Exception {
+        File dir = new File(getFilesDir(), "apps");
+        if (!dir.exists()) dir.mkdirs();
+        String fname = "app_" + System.currentTimeMillis() + ".html";
+        FileOutputStream fos = new FileOutputStream(new File(dir, fname));
+        fos.write(html.getBytes(StandardCharsets.UTF_8));
+        fos.close();
+
+        JSONArray arr = readIndex();
+        JSONObject o = new JSONObject();
+        o.put("file", fname);
+        o.put("title", title);
+        o.put("ts", System.currentTimeMillis());
+        arr.put(o);
+        getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                .putString(KEY_INDEX, arr.toString()).apply();
+        return fname;
+    }
+
+    JSONArray readIndex() {
+        try {
+            String s = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                    .getString(KEY_INDEX, "[]");
+            return new JSONArray(s);
+        } catch (Exception e) {
+            return new JSONArray();
         }
     }
 
-    private class ToolAdapter extends BaseAdapter {
-        public int getCount() {
-            return filtered.size();
+    void loadIndex() {
+        apps.clear();
+        try {
+            JSONArray arr = readIndex();
+            for (int i = arr.length() - 1; i >= 0; i--) {
+                JSONObject o = arr.getJSONObject(i);
+                apps.add(new AppEntry(o.getString("file"), o.getString("title"), o.getLong("ts")));
+            }
+        } catch (Exception ignored) { }
+    }
+
+    void refreshList() {
+        adapter.notifyDataSetChanged();
+        emptyText.setVisibility(apps.isEmpty() ? View.VISIBLE : View.GONE);
+        // expand listview inside scrollview
+        int total = 0;
+        int wSpec = View.MeasureSpec.makeMeasureSpec(
+                getResources().getDisplayMetrics().widthPixels - dp(36), View.MeasureSpec.AT_MOST);
+        for (int i = 0; i < adapter.getCount(); i++) {
+            View v = adapter.getView(i, null, appsList);
+            v.measure(wSpec,
+                    View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
+            total += v.getMeasuredHeight();
         }
-        public Object getItem(int position) {
-            return filtered.get(position);
-        }
-        public long getItemId(int position) {
-            return position;
-        }
-        public View getView(int position, View convertView, ViewGroup parent) {
-            Tool t = filtered.get(position);
+        ViewGroup.LayoutParams lp = appsList.getLayoutParams();
+        lp.height = total + appsList.getDividerHeight() * Math.max(0, adapter.getCount() - 1);
+        appsList.setLayoutParams(lp);
+    }
+
+    void openApp(String fname) {
+        File f = new File(new File(getFilesDir(), "apps"), fname);
+        Intent i = new Intent(this, AppViewActivity.class);
+        i.putExtra("file", f.getAbsolutePath());
+        startActivity(i);
+    }
+
+    void deleteApp(int pos) {
+        final AppEntry e = apps.get(pos);
+        new AlertDialog.Builder(this)
+                .setTitle("\u1016\u103B\u1000\u103A\u1019\u101C\u102C\u1038?")
+                .setMessage("\u0022" + e.title + "\u0022 \u1000\u102D\u1016\u103B\u1000\u103A\u1019\u101C\u102C\u1038")
+                .setPositiveButton("\u1016\u103B\u1000\u103A", (d, w) -> {
+                    new File(new File(getFilesDir(), "apps"), e.file).delete();
+                    try {
+                        JSONArray arr = readIndex();
+                        JSONArray out = new JSONArray();
+                        for (int i = 0; i < arr.length(); i++) {
+                            JSONObject o = arr.getJSONObject(i);
+                            if (!o.getString("file").equals(e.file)) out.put(o);
+                        }
+                        getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                                .putString(KEY_INDEX, out.toString()).apply();
+                    } catch (Exception ignored) { }
+                    loadIndex();
+                    refreshList();
+                })
+                .setNegativeButton("\u1019\u1016\u103B\u1000\u103A\u1018\u1030\u1038", null)
+                .show();
+    }
+
+    // ---------- list adapter ----------
+
+    class AppsAdapter extends BaseAdapter {
+        final SimpleDateFormat fmt = new SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US);
+
+        public int getCount() { return apps.size(); }
+        public Object getItem(int p) { return apps.get(p); }
+        public long getItemId(int p) { return p; }
+
+        public View getView(final int pos, View cv, ViewGroup parent) {
+            AppEntry e = apps.get(pos);
             LinearLayout row = new LinearLayout(MainActivity.this);
-            row.setOrientation(LinearLayout.VERTICAL);
-            int p = dp(10);
-            row.setPadding(p, p, p, p);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setBackgroundColor(CARD);
+            row.setPadding(dp(14), dp(12), dp(14), dp(12));
+            row.setGravity(Gravity.CENTER_VERTICAL);
 
-            TextView nameView = new TextView(MainActivity.this);
-            nameView.setText(t.name);
-            nameView.setTextSize(18);
+            LinearLayout info = new LinearLayout(MainActivity.this);
+            info.setOrientation(LinearLayout.VERTICAL);
+            LinearLayout.LayoutParams ilp = new LinearLayout.LayoutParams(0,
+                    ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+            info.setLayoutParams(ilp);
+            TextView t = tv(e.title, 16, true, TEXT);
+            t.setSingleLine(true);
+            t.setEllipsize(TextUtils.TruncateAt.END);
+            info.addView(t);
+            info.addView(tv(fmt.format(new Date(e.ts)), 12, false, SUB));
+            row.addView(info);
 
-            TextView descView = new TextView(MainActivity.this);
-            descView.setText(t.desc);
-            descView.setTextSize(14);
+            Button open = new Button(MainActivity.this);
+            open.setText("\u1016\u103D\u1004\u103A\u1037");
+            open.setTextColor(Color.WHITE);
+            open.setBackgroundColor(GREEN);
+            open.setOnClickListener(v -> openApp(e.file));
+            row.addView(open);
 
-            row.addView(nameView);
-            row.addView(descView);
-            return row;
+            Button del = new Button(MainActivity.this);
+            del.setText("\u1016\u103B\u1000\u103A");
+            del.setTextColor(Color.WHITE);
+            del.setBackgroundColor(DANGER);
+            LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            dlp.setMargins(dp(8), 0, 0, 0);
+            del.setLayoutParams(dlp);
+            del.setOnClickListener(v -> deleteApp(pos));
+            row.addView(del);
+
+            LinearLayout wrap = new LinearLayout(MainActivity.this);
+            wrap.setOrientation(LinearLayout.VERTICAL);
+            wrap.addView(row);
+            wrap.addView(space(8));
+            return wrap;
         }
     }
 }
