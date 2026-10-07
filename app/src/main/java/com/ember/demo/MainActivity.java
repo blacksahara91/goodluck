@@ -409,7 +409,7 @@ public class MainActivity extends Activity {
         final AppEntry e = apps.get(pos);
         new AlertDialog.Builder(this)
                 .setTitle("\u1016\u103B\u1000\u103A\u1019\u101C\u102C\u1038?")
-                .setMessage("\u0022" + e.title + "\u0022 \u1000\u102D\u1016\u103B\u1000\u103A\u1019\u101C\u102C\u1038")
+                .setMessage("\"" + e.title + "\" \u1000\u102D\u1016\u103B\u1000\u103A\u1019\u101C\u102C\u1038")
                 .setPositiveButton("\u1016\u103B\u1000\u103A", (d, w) -> {
                     new File(new File(getFilesDir(), "apps"), e.file).delete();
                     try {
