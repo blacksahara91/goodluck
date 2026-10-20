@@ -3,15 +3,15 @@ plugins {
 }
 
 android {
-    namespace 'com.ember.demo'
+    namespace 'com.ember.bylauncher'
     compileSdk 34
 
     defaultConfig {
-        applicationId "com.ember.demo"
+        applicationId "com.ember.bylauncher"
         minSdk 24
         targetSdk 34
-        versionCode 10
-        versionName "10.0"
+        versionCode 11
+        versionName "11.0"
     }
     buildTypes {
         debug {}
