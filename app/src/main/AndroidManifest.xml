@@ -1,25 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- Needed for the swipe-down gesture to expand the notification shade
-         through StatusBarManager on older / standard ROM backports. -->
+    <!-- Needed for the swipe-down gesture to expand the notification shade. -->
     <uses-permission android:name="android.permission.EXPAND_STATUS_BAR" />
 
-    <!-- Launcher needs no other permissions: MAIN/LAUNCHER intent queries
-         are in the default visible-app set, <queries> kept for safety. -->
+    <!-- <queries> kept for safety on Android 11+ package visibility. -->
     <queries>
         <intent>
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />
         </intent>
     </queries>
+
     <application
-        android:label="အရောင်စုံ Launcher"
-        android:theme="@android:style/Theme.Material.NoActionBar">
+        android:label="Slipknot Launcher"
+        android:theme="@android:style/Theme.Material.NoActionBar"
+        android:allowBackup="true">
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:launchMode="singleTask"
-            android:configChanges="orientation|screenSize|keyboardHidden">
+            android:launchMode="singleTask">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
