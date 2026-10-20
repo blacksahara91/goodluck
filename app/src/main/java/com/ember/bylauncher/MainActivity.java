@@ -3,19 +3,27 @@ package com.ember.bylauncher;
 import android.app.Activity;
 import android.content.ActivityNotFoundException;
 import android.content.ComponentName;
+import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
+import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
+import android.os.Handler;
+import android.provider.AlarmClock;
 import android.provider.Settings;
 import android.text.Editable;
 import android.text.TextUtils;
 import android.text.TextWatcher;
+import android.view.GestureDetector;
 import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.inputmethod.InputMethodManager;
 import android.widget.BaseAdapter;
 import android.widget.Button;
 import android.widget.EditText;
@@ -26,32 +34,68 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import java.lang.reflect.Method;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.Date;
 import java.util.List;
+import java.util.Locale;
 
 /**
- * အမဲ+အဝါ Launcher - a simple home-screen launcher with a
- * black / gold-yellow aesthetic. No permissions, no network,
- * no third-party libs. Pure programmatic UI.
+ * အရောင်စုံ Launcher - gesture + multi-theme home launcher.
+ * Pure Android framework, no third-party libs, programmatic UI, Burmese labels.
  *
  * Features:
- *  - Acts as a home launcher (HOME + DEFAULT categories in manifest).
- *  - Grid of all launchable installed apps (icon + label), alphabetical.
- *  - Search box filters apps as you type.
- *  - Favorites row (Phone, Messages, Chrome, Camera) when installed.
- *  - Button to open Android home settings to set as default launcher.
- *  - Burmese UI labels throughout.
+ *  - 5 built-in color themes (black+red, black+gold, white+black,
+ *    black+blue, red+yellow), persisted in SharedPreferences.
+ *  - Live clock + date at the top, updating every minute.
+ *  - Grid of all launchable installed apps, alphabetical, tap to launch.
+ *  - Search box with live filter, favorites row, "set as default home" button.
+ *  - Gestures: swipe up = scroll top + search; swipe down = notification
+ *    shade; swipe left/right = next/previous theme; double tap = alarm app;
+ *    long press = wallpaper picker.
  */
 public class MainActivity extends Activity {
 
-    static final int BG = 0xFF000000;      // black
-    static final int ACCENT = 0xFFFFCC00;  // gold yellow
-    static final int CARD = 0xFF141414;    // near-black card
-    static final int TEXT = 0xFFFFFFFF;
-    static final int SUB = 0xFFAAAAAA;
-    static final int ON_ACCENT = 0xFF000000; // dark text on yellow
+    // ---- themes: {BG, ACCENT, CARD, TEXT, SUB, ON_ACCENT} ----
+    static final String[] THEME_NAMES = {
+            "အမဲ+အနီ",
+            "အမဲ+အဝါ",
+            "အဖြူ+အမဲ",
+            "အမဲ+အပြာ",
+            "အနီ+အဝါ",
+    };
+    static final int[][] THEMES = {
+            {0xFF000000, 0xFFE53935, 0xFF1A0A0A, 0xFFFFFFFF, 0xFFAAAAAA, 0xFFFFFFFF}, // အမဲ+အနီ
+            {0xFF000000, 0xFFFFCC00, 0xFF141414, 0xFFFFFFFF, 0xFFAAAAAA, 0xFF000000}, // အမဲ+အဝါ
+            {0xFFFFFFFF, 0xFF111111, 0xFFF0F0F0, 0xFF111111, 0xFF666666, 0xFFFFFFFF}, // အဖြူ+အမဲ
+            {0xFF000000, 0xFF2979FF, 0xFF0A1428, 0xFFFFFFFF, 0xFFAAAAAA, 0xFFFFFFFF}, // အမဲ+အပြာ
+            {0xFFB71C1C, 0xFFFFEB3B, 0xFF7F0000, 0xFFFFFFFF, 0xFFFFE0B2, 0xFF000000}, // အနီ+အဝါ
+    };
+    static final String PREFS = "launcher_prefs";
+    static final String KEY_THEME = "theme_index";
+
+    // non-final: assigned from the active theme before setContentView
+    static int BG;
+    static int ACCENT;
+    static int CARD;
+    static int TEXT;
+    static int SUB;
+    static int ON_ACCENT;
+    static int themeIndex = 0;
+
+    static void loadTheme(int idx) {
+        int[] t = THEMES[idx];
+        BG = t[0];
+        ACCENT = t[1];
+        CARD = t[2];
+        TEXT = t[3];
+        SUB = t[4];
+        ON_ACCENT = t[5];
+        themeIndex = idx;
+    }
 
     // { label, package-name candidates in preference order }
     static final String[][] FAVORITES = {
@@ -68,37 +112,155 @@ public class MainActivity extends Activity {
     final List<ResolveInfo> allApps = new ArrayList<ResolveInfo>();
     final List<ResolveInfo> shownApps = new ArrayList<ResolveInfo>();
     AppGridAdapter gridAdapter;
+    GridView gridView;
     EditText searchBox;
     TextView countView;
+    TextView clockTime;
+    TextView clockDate;
     LinearLayout favRow;
+    GestureDetector gestureDetector;
+
+    final Handler clockHandler = new Handler();
+    final Runnable clockTick = new Runnable() {
+        @Override public void run() {
+            updateClock();
+            clockHandler.postDelayed(this, 60000);
+        }
+    };
+
+    // ---- gestures ----
+    final class GestureListener extends GestureDetector.SimpleOnGestureListener {
+        @Override public boolean onFling(MotionEvent e1, MotionEvent e2,
+                                         float velocityX, float velocityY) {
+            if (e1 == null || e2 == null) return false;
+            float dx = e2.getX() - e1.getX();
+            float dy = e2.getY() - e1.getY();
+            if (dy < -150 && Math.abs(velocityY) > 300) {
+                // swipe up: scroll to top + focus search
+                if (gridView != null) gridView.smoothScrollToPosition(0);
+                focusSearch();
+                return true;
+            }
+            if (dy > 150 && Math.abs(velocityY) > 300) {
+                // swipe down: notification shade
+                expandShade();
+                return true;
+            }
+            if (dx < -150 && Math.abs(velocityX) > 300
+                    && Math.abs(dy) < 250) {
+                // swipe left: next theme
+                setTheme(themeIndex + 1);
+                return true;
+            }
+            if (dx > 150 && Math.abs(velocityX) > 300
+                    && Math.abs(dy) < 250) {
+                // swipe right: previous theme
+                setTheme(themeIndex - 1);
+                return true;
+            }
+            return false;
+        }
+
+        @Override public boolean onDoubleTap(MotionEvent e) {
+            showAlarm();
+            return true;
+        }
+
+        @Override public void onLongPress(MotionEvent e) {
+            pickWallpaper();
+        }
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+        int idx = prefs.getInt(KEY_THEME, 0);
+        if (idx < 0 || idx >= THEMES.length) idx = 0;
+        loadTheme(idx);
+
         super.onCreate(savedInstanceState);
         pm = getPackageManager();
+        gestureDetector = new GestureDetector(this, new GestureListener());
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(BG);
         root.setPadding(dp(12), dp(16), dp(12), dp(8));
 
+        // ---- clock + date ----
+        clockTime = new TextView(this);
+        clockTime.setTextColor(ACCENT);
+        clockTime.setTextSize(34);
+        clockTime.setTypeface(Typeface.DEFAULT_BOLD);
+        clockTime.setGravity(Gravity.CENTER);
+        root.addView(clockTime, wrapLp());
+
+        clockDate = new TextView(this);
+        clockDate.setTextColor(SUB);
+        clockDate.setTextSize(14);
+        clockDate.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams dateLp = wrapLp();
+        dateLp.setMargins(0, dp(2), 0, dp(8));
+        root.addView(clockDate, dateLp);
+        updateClock();
+        clockHandler.postDelayed(clockTick, 60000);
+
         // ---- header ----
         TextView title = new TextView(this);
-        title.setText("အမဲ+အဝါ Launcher");
+        title.setText("အရောင်စုံ Launcher");
         title.setTextColor(ACCENT);
-        title.setTextSize(26);
+        title.setTextSize(24);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         title.setGravity(Gravity.CENTER);
         root.addView(title, wrapLp());
 
-        TextView sub = new TextView(this);
-        sub.setText("အိမ်မျက်နှာပြင် — အက်ပ်အားလုံး ဒီမှာရှိတယ်");
-        sub.setTextColor(SUB);
-        sub.setTextSize(14);
-        sub.setGravity(Gravity.CENTER);
-        LinearLayout.LayoutParams subLp = wrapLp();
-        subLp.setMargins(0, dp(4), 0, dp(10));
-        root.addView(sub, subLp);
+        TextView hint = new TextView(this);
+        hint.setText("ဆွဲတင်=ရှာ · ဆွဲချ=အသိပေးချက် · ဘေးဆွဲ=အရောင်ပြောင်း · ၂ချက်ထိ=နှိုးစက် · ကြာကြာဖိ=wallpaper");
+        hint.setTextColor(SUB);
+        hint.setTextSize(11);
+        hint.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams hintLp = wrapLp();
+        hintLp.setMargins(0, dp(4), 0, dp(8));
+        root.addView(hint, hintLp);
+
+        // ---- theme swatches ----
+        TextView themeLabel = new TextView(this);
+        themeLabel.setText("အရောင်");
+        themeLabel.setTextColor(SUB);
+        themeLabel.setTextSize(13);
+        root.addView(themeLabel, wrapLp());
+
+        LinearLayout themeRow = new LinearLayout(this);
+        themeRow.setOrientation(LinearLayout.HORIZONTAL);
+        themeRow.setGravity(Gravity.CENTER_VERTICAL);
+        for (int i = 0; i < THEMES.length; i++) {
+            final int swIdx = i;
+            View sw = new View(this);
+            LinearLayout.LayoutParams swLp =
+                    new LinearLayout.LayoutParams(dp(48), dp(48));
+            swLp.setMargins(dp(6), dp(4), dp(6), dp(4));
+            GradientDrawable d = new GradientDrawable();
+            d.setShape(GradientDrawable.OVAL);
+            d.setColor(THEMES[i][1]); // ACCENT on BG
+            d.setStroke(i == themeIndex ? dp(4) : dp(2),
+                    i == themeIndex ? TEXT : SUB);
+            sw.setBackground(d);
+            sw.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) {
+                    setTheme(swIdx);
+                }
+            });
+            themeRow.addView(sw, swLp);
+        }
+        HorizontalScrollView themeScroll = new HorizontalScrollView(this);
+        themeScroll.setHorizontalScrollBarEnabled(false);
+        themeScroll.addView(themeRow,
+                new ViewGroup.LayoutParams(
+                        ViewGroup.LayoutParams.WRAP_CONTENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT));
+        LinearLayout.LayoutParams themeLp = wrapLp();
+        themeLp.setMargins(0, dp(2), 0, dp(8));
+        root.addView(themeScroll, themeLp);
 
         // ---- favorites ----
         TextView favLabel = new TextView(this);
@@ -149,25 +311,25 @@ public class MainActivity extends Activity {
         root.addView(countView, countLp);
 
         // ---- app grid (fills remaining space, scrolls itself) ----
-        GridView grid = new GridView(this);
-        grid.setNumColumns(4);
-        grid.setStretchMode(GridView.STRETCH_COLUMN_WIDTH);
-        grid.setVerticalSpacing(dp(8));
-        grid.setHorizontalSpacing(dp(4));
-        grid.setGravity(Gravity.CENTER);
-        grid.setSelector(android.R.color.transparent);
+        gridView = new GridView(this);
+        gridView.setNumColumns(4);
+        gridView.setStretchMode(GridView.STRETCH_COLUMN_WIDTH);
+        gridView.setVerticalSpacing(dp(8));
+        gridView.setHorizontalSpacing(dp(4));
+        gridView.setGravity(Gravity.CENTER);
+        gridView.setSelector(android.R.color.transparent);
         gridAdapter = new AppGridAdapter();
-        grid.setAdapter(gridAdapter);
+        gridView.setAdapter(gridAdapter);
         LinearLayout.LayoutParams gridLp =
                 new LinearLayout.LayoutParams(
                         LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f);
-        root.addView(grid, gridLp);
+        root.addView(gridView, gridLp);
 
         // ---- set-as-default button ----
         Button homeBtn = new Button(this);
         homeBtn.setText("မူလ Home အဖြစ် သတ်မှတ်ရန်");
         homeBtn.setBackgroundColor(ACCENT);
-        homeBtn.setTextColor(ON_ACCENT); // black text on yellow for contrast
+        homeBtn.setTextColor(ON_ACCENT);
         homeBtn.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
                 openHomeSettings();
@@ -177,6 +339,16 @@ public class MainActivity extends Activity {
         homeLp.setMargins(0, dp(8), 0, 0);
         root.addView(homeBtn, homeLp);
 
+        // ---- gestures: forward to detector but don't consume ----
+        final View.OnTouchListener forwarder = new View.OnTouchListener() {
+            @Override public boolean onTouch(View v, MotionEvent event) {
+                gestureDetector.onTouchEvent(event);
+                return false; // let taps and scrolls work normally
+            }
+        };
+        root.setOnTouchListener(forwarder);
+        gridView.setOnTouchListener(forwarder);
+
         setContentView(root);
     }
 
@@ -184,6 +356,76 @@ public class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         reloadApps();
+    }
+
+    @Override
+    protected void onDestroy() {
+        clockHandler.removeCallbacks(clockTick);
+        super.onDestroy();
+    }
+
+    // ---- theme ----
+
+    void setTheme(int idx) {
+        idx = (idx + THEMES.length) % THEMES.length;
+        getSharedPreferences(PREFS, MODE_PRIVATE)
+                .edit().putInt(KEY_THEME, idx).apply();
+        Toast.makeText(this, THEME_NAMES[idx], Toast.LENGTH_SHORT).show();
+        recreate();
+    }
+
+    // ---- clock ----
+
+    void updateClock() {
+        Date now = new Date();
+        if (clockTime != null) {
+            clockTime.setText(
+                    new SimpleDateFormat("HH:mm", Locale.getDefault())
+                            .format(now));
+        }
+        if (clockDate != null) {
+            clockDate.setText(
+                    new SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
+                            .format(now));
+        }
+    }
+
+    // ---- gesture actions ----
+
+    void focusSearch() {
+        if (searchBox == null) return;
+        searchBox.requestFocus();
+        InputMethodManager imm = (InputMethodManager)
+                getSystemService(Context.INPUT_METHOD_SERVICE);
+        if (imm != null) {
+            imm.showSoftInput(searchBox, InputMethodManager.SHOW_IMPLICIT);
+        }
+    }
+
+    void expandShade() {
+        try {
+            Object sb = getSystemService("statusbar");
+            Method m = sb.getClass().getMethod("expandNotificationsPanel");
+            m.invoke(sb);
+        } catch (Exception e) {
+            Toast.makeText(this, "မဖွင့်နိုင်ပါ", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    void showAlarm() {
+        try {
+            startActivity(new Intent(AlarmClock.ACTION_SHOW_ALARMS));
+        } catch (Exception e) {
+            Toast.makeText(this, "မဖွင့်နိုင်ပါ", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    void pickWallpaper() {
+        try {
+            startActivity(new Intent(Intent.ACTION_SET_WALLPAPER));
+        } catch (Exception e) {
+            Toast.makeText(this, "မဖွင့်နိုင်ပါ", Toast.LENGTH_SHORT).show();
+        }
     }
 
     // ---- data ----
