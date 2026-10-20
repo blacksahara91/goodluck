@@ -149,13 +149,13 @@ public class MainActivity extends Activity {
             if (dx < -150 && Math.abs(velocityX) > 300
                     && Math.abs(dy) < 250) {
                 // swipe left: next theme
-                setTheme(themeIndex + 1);
+                applyTheme(themeIndex + 1);
                 return true;
             }
             if (dx > 150 && Math.abs(velocityX) > 300
                     && Math.abs(dy) < 250) {
                 // swipe right: previous theme
-                setTheme(themeIndex - 1);
+                applyTheme(themeIndex - 1);
                 return true;
             }
             return false;
@@ -173,12 +173,11 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
         SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
         int idx = prefs.getInt(KEY_THEME, 0);
         if (idx < 0 || idx >= THEMES.length) idx = 0;
         loadTheme(idx);
-
-        super.onCreate(savedInstanceState);
         pm = getPackageManager();
         gestureDetector = new GestureDetector(this, new GestureListener());
 
@@ -247,7 +246,7 @@ public class MainActivity extends Activity {
             sw.setBackground(d);
             sw.setOnClickListener(new View.OnClickListener() {
                 @Override public void onClick(View v) {
-                    setTheme(swIdx);
+                    applyTheme(swIdx);
                 }
             });
             themeRow.addView(sw, swLp);
@@ -366,7 +365,7 @@ public class MainActivity extends Activity {
 
     // ---- theme ----
 
-    void setTheme(int idx) {
+    void applyTheme(int idx) {
         idx = (idx + THEMES.length) % THEMES.length;
         getSharedPreferences(PREFS, MODE_PRIVATE)
                 .edit().putInt(KEY_THEME, idx).apply();
