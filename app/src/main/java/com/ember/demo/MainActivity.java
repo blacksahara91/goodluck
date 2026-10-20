@@ -3,19 +3,27 @@ package com.ember.demo;
 import android.app.Activity;
 import android.content.ActivityNotFoundException;
 import android.content.ComponentName;
+import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
+import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
+import android.os.Handler;
+import android.provider.AlarmClock;
 import android.provider.Settings;
 import android.text.Editable;
 import android.text.TextUtils;
 import android.text.TextWatcher;
+import android.view.GestureDetector;
 import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.inputmethod.InputMethodManager;
 import android.widget.BaseAdapter;
 import android.widget.Button;
 import android.widget.EditText;
@@ -26,31 +34,45 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import java.lang.reflect.Method;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.Date;
 import java.util.List;
+import java.util.Locale;
 
 /**
- * Slipknot Launcher - a simple home-screen launcher with a
- * black / blood-red Slipknot aesthetic. No permissions, no network,
- * no third-party libs. Pure programmatic UI.
+ * Slipknot Launcher - multicolour all-at-once + gestures home launcher.
+ * Pure Android framework, no third-party libs, programmatic UI, Burmese labels.
  *
- * Features:
- *  - Acts as a home launcher (HOME + DEFAULT categories in manifest).
- *  - Grid of all launchable installed apps (icon + label), alphabetical.
- *  - Search box filters apps as you type.
- *  - Favorites row (Phone, Messages, Chrome, Camera) when installed.
- *  - Button to open Android home settings to set as default launcher.
- *  - Burmese UI labels throughout.
+ * Slipknot dark base (black) with the full colour palette shown SIMULTANEOUSLY:
+ * grid item labels cycle RED/GOLD/BLUE/WHITE, favourites get coloured rings,
+ * no theme switching. Swipe left/right only cycles the header accent colour.
  */
 public class MainActivity extends Activity {
 
-    static final int BG = 0xFF000000;      // black
-    static final int ACCENT = 0xFFCC0000;  // blood red
-    static final int CARD = 0xFF141414;    // near-black card
-    static final int TEXT = 0xFFFFFFFF;
-    static final int SUB = 0xFFAAAAAA;
+    // ---- multicolour palette (all shown at once) ----
+    static final int RED   = 0xFFE53935;
+    static final int GOLD  = 0xFFFFCC00;
+    static final int BLUE  = 0xFF2979FF;
+    static final int WHITE = 0xFFFFFFFF;
+    static final int[] PALETTE = {RED, GOLD, BLUE, WHITE};
+    static final String[] ACCENT_NAMES = {"အနီ", "အဝါ", "အပြာ", "အဖြူ"};
+
+    static final int BG        = 0xFF000000;
+    static final int CELL_A    = 0xFF111111;
+    static final int CELL_B    = 0xFF1A1A1A;
+    static final int SEARCH_BG = 0xFF141414;
+    static final int TEXT      = WHITE;
+    static final int SUB       = 0xFFAAAAAA;
+
+    static final String PREFS = "slipknot_prefs";
+    static final String KEY_ACCENT = "accent_index";
+
+    // header accent: cycles with swipe left/right; everything else stays multicolour
+    static int ACCENT = RED;
 
     // { label, package-name candidates in preference order }
     static final String[][] FAVORITES = {
@@ -67,39 +89,119 @@ public class MainActivity extends Activity {
     final List<ResolveInfo> allApps = new ArrayList<ResolveInfo>();
     final List<ResolveInfo> shownApps = new ArrayList<ResolveInfo>();
     AppGridAdapter gridAdapter;
+    GridView gridView;
     EditText searchBox;
     TextView countView;
+    TextView clockTime;
+    TextView clockDate;
     LinearLayout favRow;
+    GestureDetector gestureDetector;
+
+    final Handler clockHandler = new Handler();
+    final Runnable clockTick = new Runnable() {
+        @Override public void run() {
+            updateClock();
+            clockHandler.postDelayed(this, 60000);
+        }
+    };
+
+    // ---- gestures ----
+    final class GestureListener extends GestureDetector.SimpleOnGestureListener {
+        @Override public boolean onFling(MotionEvent e1, MotionEvent e2,
+                                         float velocityX, float velocityY) {
+            if (e1 == null || e2 == null) return false;
+            float dx = e2.getX() - e1.getX();
+            float dy = e2.getY() - e1.getY();
+            if (dy < -150 && Math.abs(velocityY) > 300) {
+                // swipe up: scroll to top + focus search
+                if (gridView != null) gridView.smoothScrollToPosition(0);
+                focusSearch();
+                return true;
+            }
+            if (dy > 150 && Math.abs(velocityY) > 300) {
+                // swipe down: notification shade
+                expandShade();
+                return true;
+            }
+            if (dx < -150 && Math.abs(velocityX) > 300
+                    && Math.abs(dy) < 250) {
+                // swipe left: next header accent
+                cycleAccent(1);
+                return true;
+            }
+            if (dx > 150 && Math.abs(velocityX) > 300
+                    && Math.abs(dy) < 250) {
+                // swipe right: previous header accent
+                cycleAccent(-1);
+                return true;
+            }
+            return false;
+        }
+
+        @Override public boolean onDoubleTap(MotionEvent e) {
+            showAlarm();
+            return true;
+        }
+
+        @Override public void onLongPress(MotionEvent e) {
+            pickWallpaper();
+        }
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+        int idx = prefs.getInt(KEY_ACCENT, 0);
+        if (idx < 0 || idx >= PALETTE.length) idx = 0;
+        ACCENT = PALETTE[idx];
+
         pm = getPackageManager();
+        gestureDetector = new GestureDetector(this, new GestureListener());
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(BG);
         root.setPadding(dp(12), dp(16), dp(12), dp(8));
 
+        // ---- clock + date ----
+        clockTime = new TextView(this);
+        clockTime.setTextColor(ACCENT);
+        clockTime.setTextSize(34);
+        clockTime.setTypeface(Typeface.DEFAULT_BOLD);
+        clockTime.setGravity(Gravity.CENTER);
+        root.addView(clockTime, wrapLp());
+
+        clockDate = new TextView(this);
+        clockDate.setTextColor(SUB);
+        clockDate.setTextSize(14);
+        clockDate.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams dateLp = wrapLp();
+        dateLp.setMargins(0, dp(2), 0, dp(8));
+        root.addView(clockDate, dateLp);
+        updateClock();
+        clockHandler.postDelayed(clockTick, 60000);
+
         // ---- header ----
         TextView title = new TextView(this);
-        title.setText("SLIPKNOT LAUNCHER");
+        title.setText("Slipknot Launcher");
         title.setTextColor(ACCENT);
-        title.setTextSize(26);
+        title.setTextSize(24);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         title.setGravity(Gravity.CENTER);
         root.addView(title, wrapLp());
 
-        TextView sub = new TextView(this);
-        sub.setText("အိမ်မျက်နှာပြင် — အက်ပ်အားလုံး ဒီမှာရှိတယ်");
-        sub.setTextColor(SUB);
-        sub.setTextSize(14);
-        sub.setGravity(Gravity.CENTER);
-        LinearLayout.LayoutParams subLp = wrapLp();
-        subLp.setMargins(0, dp(4), 0, dp(10));
-        root.addView(sub, subLp);
+        TextView hint = new TextView(this);
+        hint.setText("အပေါ်ဆွဲ=ရှာဖွေ · အောက်ဆွဲ=အသိပေးချက် · ဘေးဆွဲ=အရောင် · ၂ချက်ထိ=နှိုးစက် · ကြာကြာဖိ=wallpaper");
+        hint.setTextColor(SUB);
+        hint.setTextSize(11);
+        hint.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams hintLp = wrapLp();
+        hintLp.setMargins(0, dp(4), 0, dp(8));
+        root.addView(hint, hintLp);
 
-        // ---- favorites ----
+        // ---- favourites (multicolour rings) ----
         TextView favLabel = new TextView(this);
         favLabel.setText("အသုံးများသော");
         favLabel.setTextColor(SUB);
@@ -124,7 +226,7 @@ public class MainActivity extends Activity {
         searchBox.setHint("အက်ပ်ရှာရန်...");
         searchBox.setHintTextColor(0xFF777777);
         searchBox.setTextColor(TEXT);
-        searchBox.setBackgroundColor(CARD);
+        searchBox.setBackgroundColor(SEARCH_BG);
         searchBox.setPadding(dp(14), dp(12), dp(14), dp(12));
         searchBox.addTextChangedListener(new TextWatcher() {
             @Override public void beforeTextChanged(CharSequence s,
@@ -148,25 +250,25 @@ public class MainActivity extends Activity {
         root.addView(countView, countLp);
 
         // ---- app grid (fills remaining space, scrolls itself) ----
-        GridView grid = new GridView(this);
-        grid.setNumColumns(4);
-        grid.setStretchMode(GridView.STRETCH_COLUMN_WIDTH);
-        grid.setVerticalSpacing(dp(8));
-        grid.setHorizontalSpacing(dp(4));
-        grid.setGravity(Gravity.CENTER);
-        grid.setSelector(android.R.color.transparent);
+        gridView = new GridView(this);
+        gridView.setNumColumns(4);
+        gridView.setStretchMode(GridView.STRETCH_COLUMN_WIDTH);
+        gridView.setVerticalSpacing(dp(8));
+        gridView.setHorizontalSpacing(dp(4));
+        gridView.setGravity(Gravity.CENTER);
+        gridView.setSelector(android.R.color.transparent);
         gridAdapter = new AppGridAdapter();
-        grid.setAdapter(gridAdapter);
+        gridView.setAdapter(gridAdapter);
         LinearLayout.LayoutParams gridLp =
                 new LinearLayout.LayoutParams(
                         LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f);
-        root.addView(grid, gridLp);
+        root.addView(gridView, gridLp);
 
         // ---- set-as-default button ----
         Button homeBtn = new Button(this);
         homeBtn.setText("မူလ Home အဖြစ် သတ်မှတ်ရန်");
-        homeBtn.setBackgroundColor(ACCENT);
-        homeBtn.setTextColor(TEXT);
+        homeBtn.setBackgroundColor(RED);
+        homeBtn.setTextColor(WHITE);
         homeBtn.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
                 openHomeSettings();
@@ -176,6 +278,16 @@ public class MainActivity extends Activity {
         homeLp.setMargins(0, dp(8), 0, 0);
         root.addView(homeBtn, homeLp);
 
+        // ---- gestures: forward to detector but don't consume ----
+        final View.OnTouchListener forwarder = new View.OnTouchListener() {
+            @Override public boolean onTouch(View v, MotionEvent event) {
+                gestureDetector.onTouchEvent(event);
+                return false; // let taps and scrolls work normally
+            }
+        };
+        root.setOnTouchListener(forwarder);
+        gridView.setOnTouchListener(forwarder);
+
         setContentView(root);
     }
 
@@ -183,6 +295,81 @@ public class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         reloadApps();
+    }
+
+    @Override
+    protected void onDestroy() {
+        clockHandler.removeCallbacks(clockTick);
+        super.onDestroy();
+    }
+
+    // ---- header accent cycling (accent-only; rest stays multicolour) ----
+
+    void cycleAccent(int dir) {
+        int idx = 0;
+        for (int i = 0; i < PALETTE.length; i++) {
+            if (PALETTE[i] == ACCENT) { idx = i; break; }
+        }
+        idx = (idx + dir + PALETTE.length) % PALETTE.length;
+        getSharedPreferences(PREFS, MODE_PRIVATE)
+                .edit().putInt(KEY_ACCENT, idx).apply();
+        Toast.makeText(this, "အရောင်: " + ACCENT_NAMES[idx],
+                Toast.LENGTH_SHORT).show();
+        recreate();
+    }
+
+    // ---- clock ----
+
+    void updateClock() {
+        Date now = new Date();
+        if (clockTime != null) {
+            clockTime.setText(
+                    new SimpleDateFormat("HH:mm", Locale.getDefault())
+                            .format(now));
+        }
+        if (clockDate != null) {
+            clockDate.setText(
+                    new SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
+                            .format(now));
+        }
+    }
+
+    // ---- gesture actions ----
+
+    void focusSearch() {
+        if (searchBox == null) return;
+        searchBox.requestFocus();
+        InputMethodManager imm = (InputMethodManager)
+                getSystemService(Context.INPUT_METHOD_SERVICE);
+        if (imm != null) {
+            imm.showSoftInput(searchBox, InputMethodManager.SHOW_IMPLICIT);
+        }
+    }
+
+    void expandShade() {
+        try {
+            Object sb = getSystemService("statusbar");
+            Method m = sb.getClass().getMethod("expandNotificationsPanel");
+            m.invoke(sb);
+        } catch (Exception e) {
+            Toast.makeText(this, "မဖွင့်နိုင်ပါ", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    void showAlarm() {
+        try {
+            startActivity(new Intent(AlarmClock.ACTION_SHOW_ALARMS));
+        } catch (Exception e) {
+            Toast.makeText(this, "မဖွင့်နိုင်ပါ", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    void pickWallpaper() {
+        try {
+            startActivity(new Intent(Intent.ACTION_SET_WALLPAPER));
+        } catch (Exception e) {
+            Toast.makeText(this, "မဖွင့်နိုင်ပါ", Toast.LENGTH_SHORT).show();
+        }
     }
 
     // ---- data ----
@@ -227,6 +414,7 @@ public class MainActivity extends Activity {
 
     void buildFavorites() {
         favRow.removeAllViews();
+        int favPos = 0;
         for (String[] row : FAVORITES) {
             String label = row[0];
             Intent launch = null;
@@ -254,12 +442,20 @@ public class MainActivity extends Activity {
             item.setPadding(dp(8), dp(4), dp(8), dp(4));
             item.setClickable(true);
 
+            // icon with multicolour ring
             ImageView iv = new ImageView(this);
             if (icon != null) {
                 iv.setImageDrawable(icon);
             }
+            int ringColor = PALETTE[favPos % PALETTE.length];
+            GradientDrawable ring = new GradientDrawable();
+            ring.setShape(GradientDrawable.OVAL);
+            ring.setColor(0xFF141414);
+            ring.setStroke(dp(3), ringColor);
+            iv.setBackground(ring);
+            iv.setPadding(dp(6), dp(6), dp(6), dp(6));
             item.addView(iv,
-                    new LinearLayout.LayoutParams(dp(44), dp(44)));
+                    new LinearLayout.LayoutParams(dp(56), dp(56)));
 
             TextView tv = new TextView(this);
             tv.setText(label);
@@ -285,6 +481,7 @@ public class MainActivity extends Activity {
                 }
             });
             favRow.addView(item);
+            favPos++;
         }
     }
 
@@ -344,7 +541,6 @@ public class MainActivity extends Activity {
                         new LinearLayout.LayoutParams(dp(48), dp(48)));
 
                 label = new TextView(MainActivity.this);
-                label.setTextColor(TEXT);
                 label.setTextSize(12);
                 label.setGravity(Gravity.CENTER);
                 label.setMaxLines(2);
@@ -366,6 +562,10 @@ public class MainActivity extends Activity {
             if (d != null) {
                 icon.setImageDrawable(d);
             }
+            // multicolour: label cycles the palette, cells alternate dark shades
+            int c = PALETTE[position % PALETTE.length];
+            label.setTextColor(c);
+            cell.setBackgroundColor((position / 4) % 2 == 0 ? CELL_A : CELL_B);
             label.setText(info.loadLabel(pm));
             cell.setOnClickListener(new View.OnClickListener() {
                 @Override public void onClick(View v) {
