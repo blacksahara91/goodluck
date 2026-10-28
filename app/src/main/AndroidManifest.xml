@@ -2,6 +2,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- Needed for the swipe-down gesture to expand the notification shade. -->
     <uses-permission android:name="android.permission.EXPAND_STATUS_BAR" />
+    <!-- Tiny haptic tick when a system gesture fires. -->
+    <uses-permission android:name="android.permission.VIBRATE" />
 
     <!-- <queries> kept for safety on Android 11+ package visibility. -->
     <queries>
@@ -26,5 +28,21 @@
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
+
+        <!-- System gestures (Back / Home / Recents from screen edges).
+             The user enables this by hand in Accessibility settings;
+             it reads no window content and only watches its own edge strips. -->
+        <service
+            android:name=".GestureService"
+            android:label="Slipknot Gesture"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/gesture_service_config" />
+        </service>
     </application>
 </manifest>
