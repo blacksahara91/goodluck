@@ -48,7 +48,7 @@ import java.util.Locale;
  */
 public class MainActivity extends Activity {
 
-    static final String BUILD_MARKER = "SlipknotNiagara-v15";
+    static final String BUILD_MARKER = "SlipknotNiagara-v16";
 
     static final String PREFS = "slipknot_prefs";
     static final String KEY_ACCENT = "accent_index";
@@ -165,6 +165,11 @@ public class MainActivity extends Activity {
         LinearLayout header = new LinearLayout(this);
         header.setOrientation(LinearLayout.VERTICAL);
         header.setPadding(dp(16), dp(20), dp(8), dp(8));
+        // Full-width so the whole top strip is tappable (theme dialog),
+        // not just the title text itself.
+        header.setLayoutParams(new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT));
         titleView = new TextView(this);
         titleView.setText("Slipknot");
         titleView.setTextSize(30);
@@ -263,7 +268,7 @@ public class MainActivity extends Activity {
         hintView.setTextSize(12);
         hintView.setGravity(Gravity.CENTER);
         hintView.setPadding(dp(8), dp(2), dp(8), dp(12));
-        hintView.setText("အွန်း/ယာ အွန်း: Back • အောက်ဆွဲ: Home • ကြာကြာကိုင်: Recents");
+        hintView.setText("Header နှိပ်ရင် Theme ပြောင်းလို့ရ • အွန်း/ယာ အွန်း: Back • အောက်ဆွဲ: Home • ကြာကြာကိုင်: Recents");
         colLayout.addView(hintView);
 
         rootLayout.addView(colLayout);
@@ -273,14 +278,14 @@ public class MainActivity extends Activity {
 
         setContentView(rootLayout);
         applyTheme();
-        loadApps();
+        loadAppsAsync();
         refreshDate();
     }
 
     @Override
     protected void onResume() {
         super.onResume();
-        loadApps();
+        loadAppsAsync();
         refreshDate();
         applyTheme();
         refreshGestureBtn();
@@ -338,6 +343,9 @@ public class MainActivity extends Activity {
         hintView.setTextColor(faint);
         recolorScrubbers(rootLayout, faint);
         if (adapter != null) adapter.notifyDataSetChanged();
+        // Force every visible row to rebind (colour/size), not just a
+        // layout pass — ListView recycling can otherwise keep old rows.
+        if (listView != null) listView.invalidateViews();
     }
 
     void recolorScrubbers(ViewGroup parent, int color) {
@@ -457,6 +465,8 @@ public class MainActivity extends Activity {
                 action.run();
                 saveTheme();
                 dialog.dismiss();
+                Toast.makeText(MainActivity.this, "Theme ပြောင်းပြီ ✓",
+                        Toast.LENGTH_SHORT).show();
             }
         });
         view.addView(row);
@@ -472,13 +482,34 @@ public class MainActivity extends Activity {
         }
     }
 
-    void loadApps() {
+    // v16: app loading runs off the UI thread. Querying every app and
+    // loading every icon on the main thread (v14/v15) is what caused the
+    // occasional hitch when returning home; the old list stays visible
+    // until the fresh one is ready.
+    void loadAppsAsync() {
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                final ArrayList<AppEntry> loaded = queryApps();
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        fullApps.clear();
+                        fullApps.addAll(loaded);
+                        applyFilter();
+                    }
+                });
+            }
+        }).start();
+    }
+
+    ArrayList<AppEntry> queryApps() {
+        ArrayList<AppEntry> out = new ArrayList<AppEntry>();
         try {
             PackageManager pm = getPackageManager();
             Intent main = new Intent(Intent.ACTION_MAIN);
             main.addCategory(Intent.CATEGORY_LAUNCHER);
             List<ResolveInfo> infos = pm.queryIntentActivities(main, 0);
-            fullApps.clear();
             String self = getPackageName();
             for (ResolveInfo info : infos) {
                 String pkg = info.activityInfo.packageName;
@@ -495,18 +526,18 @@ public class MainActivity extends Activity {
                 char c = app.label.length() > 0
                         ? Character.toUpperCase(app.label.charAt(0)) : '#';
                 app.initial = (c >= 'A' && c <= 'Z') ? c : '#';
-                fullApps.add(app);
+                out.add(app);
             }
-            Collections.sort(fullApps, new Comparator<AppEntry>() {
+            Collections.sort(out, new Comparator<AppEntry>() {
                 @Override
                 public int compare(AppEntry a, AppEntry b) {
                     return a.label.compareToIgnoreCase(b.label);
                 }
             });
         } catch (Exception e) {
-            // Keep whatever list we already had; never crash the home screen.
+            // Return whatever we got; never crash the home screen.
         }
-        applyFilter();
+        return out;
     }
 
     void applyFilter() {
