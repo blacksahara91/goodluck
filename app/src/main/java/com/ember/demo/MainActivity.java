@@ -50,6 +50,10 @@ import java.util.Locale;
  * Slipknot dark base (black) with the full colour palette shown SIMULTANEOUSLY:
  * grid item labels cycle RED/GOLD/BLUE/WHITE, favourites get coloured rings,
  * no theme switching. Swipe left/right only cycles the header accent colour.
+ *
+ * v13 adds PHONE SYSTEM gestures via GestureService (accessibility):
+ * edge swipes act as Back / Home / Recents in every app. The button under
+ * the grid opens Accessibility settings and shows whether it is on.
  */
 public class MainActivity extends Activity {
 
@@ -90,6 +94,7 @@ public class MainActivity extends Activity {
     final List<ResolveInfo> shownApps = new ArrayList<ResolveInfo>();
     AppGridAdapter gridAdapter;
     GridView gridView;
+    Button gestureBtn;
     EditText searchBox;
     TextView countView;
     TextView clockTime;
@@ -163,7 +168,8 @@ public class MainActivity extends Activity {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(BG);
-        root.setPadding(dp(12), dp(16), dp(12), dp(8));
+        // bottom padding leaves room for the gesture service's bottom strip
+        root.setPadding(dp(12), dp(16), dp(12), dp(30));
 
         // ---- clock + date ----
         clockTime = new TextView(this);
@@ -278,6 +284,35 @@ public class MainActivity extends Activity {
         homeLp.setMargins(0, dp(8), 0, 0);
         root.addView(homeBtn, homeLp);
 
+        // ---- system gesture (accessibility) button ----
+        gestureBtn = new Button(this);
+        gestureBtn.setBackgroundColor(GOLD);
+        gestureBtn.setTextColor(0xFF000000);
+        gestureBtn.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                if (gestureServiceEnabled()) {
+                    Toast.makeText(MainActivity.this,
+                            "ဖွင့်ထားပြီ ✓ ဘယ်/ညာအစွန်းဆွဲ=Back · အောက်အစွန်းအပေါ်ဆွဲ=Home · အဝေးဆွဲ/ဖိထား=Recents",
+                            Toast.LENGTH_LONG).show();
+                } else {
+                    openAccessibilitySettings();
+                }
+            }
+        });
+        LinearLayout.LayoutParams gesLp = wrapLp();
+        gesLp.setMargins(0, dp(8), 0, 0);
+        root.addView(gestureBtn, gesLp);
+        refreshGestureBtn();
+
+        TextView gesHint = new TextView(this);
+        gesHint.setText("System gesture: ဘယ်/ညာ အစွန်းဆွဲ=Back · အောက် အစွန်းအပေါ်ဆွဲ=Home · အဝေးဆွဲ/ဖိထား=Recents (Accessibility မှာ အရင်ဖွင့်ရမယ်)");
+        gesHint.setTextColor(SUB);
+        gesHint.setTextSize(11);
+        gesHint.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams gesHintLp = wrapLp();
+        gesHintLp.setMargins(0, dp(4), 0, 0);
+        root.addView(gesHint, gesHintLp);
+
         // ---- gestures: forward to detector but don't consume ----
         final View.OnTouchListener forwarder = new View.OnTouchListener() {
             @Override public boolean onTouch(View v, MotionEvent event) {
@@ -295,6 +330,7 @@ public class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         reloadApps();
+        refreshGestureBtn();
     }
 
     @Override
@@ -497,6 +533,43 @@ public class MainActivity extends Activity {
             startActivity(i);
         } catch (Exception e) {
             Toast.makeText(this, "ဖွင့်၍မရပါ", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    // ---- system gesture service (accessibility) ----
+
+    boolean gestureServiceEnabled() {
+        try {
+            String enabled = Settings.Secure.getString(getContentResolver(),
+                    Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+            if (enabled == null || enabled.length() == 0) return false;
+            String flat = new ComponentName(this, GestureService.class)
+                    .flattenToString();
+            String full = getPackageName() + "/" + GestureService.class.getName();
+            return enabled.contains(flat) || enabled.contains(full)
+                    || enabled.contains(getPackageName() + "/.GestureService");
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    void refreshGestureBtn() {
+        if (gestureBtn == null) return;
+        gestureBtn.setText(gestureServiceEnabled()
+                ? "🖐 System Gesture: ဖွင့်ထားပြီ ✓"
+                : "🖐 System Gesture ဖွင့်ရန် နှိပ်ပါ");
+    }
+
+    void openAccessibilitySettings() {
+        try {
+            startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));
+            Toast.makeText(this,
+                    "Accessibility → Installed services → Slipknot Gesture → On လုပ်ပေးပါ",
+                    Toast.LENGTH_LONG).show();
+        } catch (Exception e) {
+            Toast.makeText(this,
+                    "Accessibility settings ကို ဖွင့်၍မရပါ",
+                    Toast.LENGTH_SHORT).show();
         }
     }
 
