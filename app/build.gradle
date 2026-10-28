@@ -10,8 +10,8 @@ android {
         applicationId "com.ember.demo"
         minSdk 24
         targetSdk 34
-        versionCode 12
-        versionName "12.0"
+        versionCode 13
+        versionName "13.0"
     }
     buildTypes {
         debug {}
