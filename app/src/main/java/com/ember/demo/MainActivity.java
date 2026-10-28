@@ -1,6 +1,7 @@
 package com.ember.demo;
 
 import android.app.Activity;
+import android.app.Dialog;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
@@ -35,29 +36,35 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * Slipknot v14 — Niagara-style home inside Slipknot.
+ * Slipknot v15 — Niagara-style home, user-tweakable.
  *
- * One app, one setup: a vertical alphabetical app list with an alphabet
- * scrubber on the right edge (Niagara-style), Slipknot black base with
- * RED / GOLD / BLUE / WHITE accents, live search, plus the v13 system
- * gesture service (Back / Home / Recents from screen edges) enabled
- * from the GOLD button below.
- *
- * No grid, no favourites rings in this build: the list IS the home.
- * Inline notification previews (Niagara Pro-style) are intentionally
- * NOT included — they need a NotificationListenerService, one more
- * permission gate, and this build is meant to stay simple.
+ * 1. The GOLD System Gesture button hides itself once the gesture
+ *    service is ON (it reappears if the service ever turns off, so
+ *    the enable path is never lost).
+ * 2. Alphabet scrubbers on BOTH the left and right edges.
+ * 3. Theme picker (tap the header): label colours, background and
+ *    font size, saved in slipknot_prefs. Icon packs are NOT included
+ *    in this build — that needs a separate icon-pack lookup.
  */
 public class MainActivity extends Activity {
 
-    static final String BUILD_MARKER = "SlipknotNiagara-v14";
+    static final String BUILD_MARKER = "SlipknotNiagara-v15";
 
     static final String PREFS = "slipknot_prefs";
     static final String KEY_ACCENT = "accent_index";
+    static final String KEY_LABEL_MODE = "label_mode";
+    static final String KEY_BG = "bg_mode";
+    static final String KEY_FONT = "font_size";
 
+    // Label modes: 0 multicolour, 1 white, 2 gold, 3 red, 4 blue.
+    // Bg modes: 0 black, 1 dark grey, 2 light.
     static final int BLACK = 0xFF000000;
     static final int DARK = 0xFF111111;
+    static final int DARKGREY = 0xFF222222;
+    static final int LIGHTBG = 0xFFF5F5F5;
+    static final int LIGHTBOX = 0xFFE0E0E0;
     static final int GREY = 0xFF888888;
+    static final int DARKTEXT = 0xFF666666;
     static final int RED = 0xFFFF5252;
     static final int GOLD = 0xFFFFCC00;
     static final int BLUE = 0xFF448AFF;
@@ -66,12 +73,17 @@ public class MainActivity extends Activity {
 
     static final String LETTERS = "#ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 
-    int accentIndex = 1; // GOLD default, same prefs keys as v12/v13
+    int accentIndex = 1; // GOLD default, same prefs keys as v12/v13/v14
+    int labelMode = 0;
+    int bgMode = 0;
+    int fontSize = 18;
+
+    LinearLayout rootLayout;
+    LinearLayout colLayout;
     TextView titleView;
     TextView dateView;
     EditText searchBox;
     ListView listView;
-    LinearLayout scrubber;
     TextView gestureBtn;
     TextView hintView;
 
@@ -91,24 +103,65 @@ public class MainActivity extends Activity {
         return Math.round(v * getResources().getDisplayMetrics().density);
     }
 
+    int bgColor() {
+        if (bgMode == 1) return DARKGREY;
+        if (bgMode == 2) return LIGHTBG;
+        return BLACK;
+    }
+
+    int boxColor() {
+        if (bgMode == 2) return LIGHTBOX;
+        return DARK;
+    }
+
+    int mainTextColor() {
+        return bgMode == 2 ? BLACK : WHITE;
+    }
+
+    int faintColor() {
+        return bgMode == 2 ? DARKTEXT : GREY;
+    }
+
+    int labelColorFor(int position) {
+        int c;
+        if (labelMode == 0) {
+            c = PALETTE[position % PALETTE.length];
+        } else if (labelMode == 1) {
+            c = WHITE;
+        } else if (labelMode == 2) {
+            c = GOLD;
+        } else if (labelMode == 3) {
+            c = RED;
+        } else {
+            c = BLUE;
+        }
+        // White labels are invisible on the light background.
+        if (bgMode == 2 && c == WHITE) return BLACK;
+        return c;
+    }
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         SharedPreferences prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         accentIndex = prefs.getInt(KEY_ACCENT, 1) % PALETTE.length;
+        labelMode = prefs.getInt(KEY_LABEL_MODE, 0);
+        bgMode = prefs.getInt(KEY_BG, 0);
+        fontSize = prefs.getInt(KEY_FONT, 18);
 
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.HORIZONTAL);
-        root.setBackgroundColor(BLACK);
+        rootLayout = new LinearLayout(this);
+        rootLayout.setOrientation(LinearLayout.HORIZONTAL);
 
-        // ---- left column: header + search + list + gesture button ----
-        LinearLayout col = new LinearLayout(this);
-        col.setOrientation(LinearLayout.VERTICAL);
+        // ---- left alphabet scrubber ----
+        rootLayout.addView(buildScrubber());
+
+        // ---- middle column: header + search + list + gesture button ----
+        colLayout = new LinearLayout(this);
+        colLayout.setOrientation(LinearLayout.VERTICAL);
         LinearLayout.LayoutParams colParams =
                 new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f);
-        col.setLayoutParams(colParams);
+        colLayout.setLayoutParams(colParams);
 
-        // Header: title + date, swipe left/right cycles accent.
         LinearLayout header = new LinearLayout(this);
         header.setOrientation(LinearLayout.VERTICAL);
         header.setPadding(dp(16), dp(20), dp(8), dp(8));
@@ -119,7 +172,6 @@ public class MainActivity extends Activity {
         titleView.setGravity(Gravity.START);
         dateView = new TextView(this);
         dateView.setTextSize(14);
-        dateView.setTextColor(GREY);
         header.addView(titleView);
         header.addView(dateView);
         final float[] downX = new float[1];
@@ -134,20 +186,19 @@ public class MainActivity extends Activity {
                         cycleAccent(1);
                     } else if (dx < -100) {
                         cycleAccent(-1);
+                    } else {
+                        // Plain tap on the header: theme picker.
+                        showThemeDialog();
                     }
                 }
                 return true;
             }
         });
-        col.addView(header);
+        colLayout.addView(header);
 
-        // Search box.
         searchBox = new EditText(this);
         searchBox.setHint("ရှာရန်…");
-        searchBox.setHintTextColor(GREY);
-        searchBox.setTextColor(WHITE);
         searchBox.setTextSize(16);
-        searchBox.setBackgroundColor(DARK);
         searchBox.setPadding(dp(12), dp(10), dp(12), dp(10));
         LinearLayout.LayoutParams searchParams = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -161,11 +212,9 @@ public class MainActivity extends Activity {
                 applyFilter();
             }
         });
-        col.addView(searchBox);
+        colLayout.addView(searchBox);
 
-        // App list.
         listView = new ListView(this);
-        listView.setBackgroundColor(BLACK);
         listView.setDivider(null);
         listView.setDividerHeight(0);
         adapter = new AppAdapter();
@@ -190,9 +239,8 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams listParams = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f);
         listView.setLayoutParams(listParams);
-        col.addView(listView);
+        colLayout.addView(listView);
 
-        // GOLD gesture button + hint.
         gestureBtn = new TextView(this);
         gestureBtn.setTextSize(16);
         gestureBtn.setGravity(Gravity.CENTER);
@@ -209,37 +257,53 @@ public class MainActivity extends Activity {
                 openAccessibilitySettings();
             }
         });
-        col.addView(gestureBtn);
+        colLayout.addView(gestureBtn);
 
         hintView = new TextView(this);
         hintView.setTextSize(12);
-        hintView.setTextColor(GREY);
         hintView.setGravity(Gravity.CENTER);
         hintView.setPadding(dp(8), dp(2), dp(8), dp(12));
         hintView.setText("အွန်း/ယာ အွန်း: Back • အောက်ဆွဲ: Home • ကြာကြာကိုင်: Recents");
-        col.addView(hintView);
+        colLayout.addView(hintView);
 
-        root.addView(col);
+        rootLayout.addView(colLayout);
 
-        // ---- right edge: alphabet scrubber ----
-        scrubber = new LinearLayout(this);
-        scrubber.setOrientation(LinearLayout.VERTICAL);
-        scrubber.setGravity(Gravity.CENTER);
+        // ---- right alphabet scrubber ----
+        rootLayout.addView(buildScrubber());
+
+        setContentView(rootLayout);
+        applyTheme();
+        loadApps();
+        refreshDate();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        loadApps();
+        refreshDate();
+        applyTheme();
+        refreshGestureBtn();
+    }
+
+    LinearLayout buildScrubber() {
+        LinearLayout scrub = new LinearLayout(this);
+        scrub.setOrientation(LinearLayout.VERTICAL);
+        scrub.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams scrubParams = new LinearLayout.LayoutParams(
                 dp(28), ViewGroup.LayoutParams.MATCH_PARENT);
-        scrubber.setLayoutParams(scrubParams);
+        scrub.setLayoutParams(scrubParams);
         for (int i = 0; i < LETTERS.length(); i++) {
             TextView letter = new TextView(this);
             letter.setText(String.valueOf(LETTERS.charAt(i)));
             letter.setTextSize(11);
-            letter.setTextColor(GREY);
             letter.setGravity(Gravity.CENTER);
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f);
             letter.setLayoutParams(lp);
-            scrubber.addView(letter);
+            scrub.addView(letter);
         }
-        scrubber.setOnTouchListener(new View.OnTouchListener() {
+        scrub.setOnTouchListener(new View.OnTouchListener() {
             @Override
             public boolean onTouch(View v, MotionEvent e) {
                 if (e.getAction() == MotionEvent.ACTION_DOWN
@@ -256,19 +320,51 @@ public class MainActivity extends Activity {
                 return false;
             }
         });
-        root.addView(scrubber);
-
-        setContentView(root);
-        loadApps();
-        refreshDate();
+        return scrub;
     }
 
-    @Override
-    protected void onResume() {
-        super.onResume();
-        loadApps();
-        refreshDate();
-        refreshGestureBtn();
+    void applyTheme() {
+        int bg = bgColor();
+        int box = boxColor();
+        int main = mainTextColor();
+        int faint = faintColor();
+        rootLayout.setBackgroundColor(bg);
+        colLayout.setBackgroundColor(bg);
+        listView.setBackgroundColor(bg);
+        searchBox.setBackgroundColor(box);
+        searchBox.setTextColor(main);
+        searchBox.setHintTextColor(faint);
+        dateView.setTextColor(faint);
+        hintView.setTextColor(faint);
+        recolorScrubbers(rootLayout, faint);
+        if (adapter != null) adapter.notifyDataSetChanged();
+    }
+
+    void recolorScrubbers(ViewGroup parent, int color) {
+        for (int i = 0; i < parent.getChildCount(); i++) {
+            View child = parent.getChildAt(i);
+            if (child instanceof LinearLayout) {
+                LinearLayout lay = (LinearLayout) child;
+                // A scrubber is a vertical strip of single-letter TextViews.
+                if (lay.getOrientation() == LinearLayout.VERTICAL
+                        && lay.getChildCount() == LETTERS.length()) {
+                    boolean lettersOnly = true;
+                    for (int j = 0; j < lay.getChildCount(); j++) {
+                        View c = lay.getChildAt(j);
+                        if (!(c instanceof TextView)
+                                || ((TextView) c).getText().length() != 1) {
+                            lettersOnly = false;
+                            break;
+                        }
+                    }
+                    if (lettersOnly) {
+                        for (int j = 0; j < lay.getChildCount(); j++) {
+                            ((TextView) lay.getChildAt(j)).setTextColor(color);
+                        }
+                    }
+                }
+            }
+        }
     }
 
     void cycleAccent(int dir) {
@@ -277,6 +373,93 @@ public class MainActivity extends Activity {
                 .putInt(KEY_ACCENT, accentIndex).apply();
         titleView.setTextColor(PALETTE[accentIndex]);
         adapter.notifyDataSetChanged();
+    }
+
+    void saveTheme() {
+        getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                .putInt(KEY_LABEL_MODE, labelMode)
+                .putInt(KEY_BG, bgMode)
+                .putInt(KEY_FONT, fontSize)
+                .apply();
+        applyTheme();
+    }
+
+    void showThemeDialog() {
+        final Dialog dialog = new Dialog(this);
+        LinearLayout view = new LinearLayout(this);
+        view.setOrientation(LinearLayout.VERTICAL);
+        view.setBackgroundColor(BLACK);
+        view.setPadding(dp(20), dp(20), dp(20), dp(20));
+
+        TextView title = new TextView(this);
+        title.setText("🎨 Theme ရွေးပါ");
+        title.setTextSize(20);
+        title.setTextColor(GOLD);
+        title.setPadding(0, 0, 0, dp(16));
+        view.addView(title);
+
+        addSection(view, "Label အရောင်");
+        addOption(view, dialog, "အရောင်စုံ (RED/GOLD/BLUE/WHITE)", labelMode == 0,
+                new Runnable() { @Override public void run() { labelMode = 0; } });
+        addOption(view, dialog, "အဖြူချည်း", labelMode == 1,
+                new Runnable() { @Override public void run() { labelMode = 1; } });
+        addOption(view, dialog, "ရွှေရောင်ချည်း", labelMode == 2,
+                new Runnable() { @Override public void run() { labelMode = 2; } });
+        addOption(view, dialog, "အနီချည်း", labelMode == 3,
+                new Runnable() { @Override public void run() { labelMode = 3; } });
+        addOption(view, dialog, "အပြာချည်း", labelMode == 4,
+                new Runnable() { @Override public void run() { labelMode = 4; } });
+
+        addSection(view, "နောက်ခံ");
+        addOption(view, dialog, "အနက်", bgMode == 0,
+                new Runnable() { @Override public void run() { bgMode = 0; } });
+        addOption(view, dialog, "မီးခိုး", bgMode == 1,
+                new Runnable() { @Override public void run() { bgMode = 1; } });
+        addOption(view, dialog, "အဖြူ", bgMode == 2,
+                new Runnable() { @Override public void run() { bgMode = 2; } });
+
+        addSection(view, "စာလုံးအရွယ်");
+        addOption(view, dialog, "သေး", fontSize == 14,
+                new Runnable() { @Override public void run() { fontSize = 14; } });
+        addOption(view, dialog, "လတ်", fontSize == 18,
+                new Runnable() { @Override public void run() { fontSize = 18; } });
+        addOption(view, dialog, "ကြီး", fontSize == 22,
+                new Runnable() { @Override public void run() { fontSize = 22; } });
+
+        dialog.setContentView(view);
+        dialog.show();
+    }
+
+    void addSection(LinearLayout view, String text) {
+        TextView section = new TextView(this);
+        section.setText(text);
+        section.setTextSize(14);
+        section.setTextColor(GREY);
+        section.setPadding(0, dp(12), 0, dp(4));
+        view.addView(section);
+    }
+
+    void addOption(LinearLayout view, final Dialog dialog, String text,
+                   boolean selected, final Runnable action) {
+        TextView row = new TextView(this);
+        row.setText((selected ? "✓ " : "") + text);
+        row.setTextSize(16);
+        row.setTextColor(selected ? GOLD : WHITE);
+        row.setBackgroundColor(DARK);
+        row.setPadding(dp(12), dp(10), dp(12), dp(10));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.setMargins(0, 0, 0, dp(4));
+        row.setLayoutParams(lp);
+        row.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                action.run();
+                saveTheme();
+                dialog.dismiss();
+            }
+        });
+        view.addView(row);
     }
 
     void refreshDate() {
@@ -344,7 +527,6 @@ public class MainActivity extends Activity {
                 return;
             }
         }
-        // No app with that letter: jump to the next letter that has one.
         for (int i = 0; i < shownApps.size(); i++) {
             if (shownApps.get(i).initial > letter) {
                 listView.setSelection(i);
@@ -395,9 +577,13 @@ public class MainActivity extends Activity {
 
     void refreshGestureBtn() {
         if (gestureBtn == null) return;
-        gestureBtn.setText(gestureServiceEnabled()
-                ? "🖐 System Gesture: ဖွင့်ထားပြီ ✓"
-                : "🖐 System Gesture ဖွင့်ရန် နှိပ်ပါ");
+        if (gestureServiceEnabled()) {
+            // Service is ON: hide the button; the gesture itself is the UI.
+            gestureBtn.setVisibility(View.GONE);
+        } else {
+            gestureBtn.setVisibility(View.VISIBLE);
+            gestureBtn.setText("🖐 System Gesture ဖွင့်ရန် နှိပ်ပါ");
+        }
     }
 
     void openAccessibilitySettings() {
@@ -413,7 +599,7 @@ public class MainActivity extends Activity {
         }
     }
 
-    // ---- list adapter: icon + label, label colour cycles the palette ----
+    // ---- list adapter: icon + label, colours/sizes from the theme ----
     final class AppAdapter extends BaseAdapter {
         @Override public int getCount() {
             return shownApps.size();
@@ -443,7 +629,6 @@ public class MainActivity extends Activity {
                 ip.setMargins(0, 0, dp(12), 0);
                 iconView.setLayoutParams(ip);
                 labelView = new TextView(MainActivity.this);
-                labelView.setTextSize(18);
                 row.addView(iconView);
                 row.addView(labelView);
                 row.setTag(new View[]{iconView, labelView});
@@ -460,7 +645,8 @@ public class MainActivity extends Activity {
                 iconView.setImageDrawable(null);
             }
             labelView.setText(app.label);
-            labelView.setTextColor(PALETTE[position % PALETTE.length]);
+            labelView.setTextSize(fontSize);
+            labelView.setTextColor(labelColorFor(position));
             return row;
         }
     }
